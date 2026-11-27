@@ -1,1 +1,86 @@
+================================================================================
+ESQUELETO DEL INFORME: CLASIFICACIÓN DE PERROS Y GATOS (PARTE 1)
+================================================================================
 
+1. OBJETIVO Y EXPLORACIÓN DEL DATASET
+--------------------------------------------------------------------------------
+- Problema: Clasificación binaria de imágenes (0 = gato, 1 = perro) utilizando 
+  descriptores visuales clásicos y un clasificador SVM.
+- Datos disponibles:
+  * Conjunto de entrenamiento (train): 2.000 imágenes (1.000 gatos, 1.000 perros).
+  * Conjunto de prueba (test): 2.000 imágenes (1.000 gatos, 1.000 perros), 
+    reservado exclusivamente para la evaluación final (evitar data leakage).
+- Análisis exploratorio inicial:
+  * Las imágenes presentan tamaños muy heterogéneos (anchos entre 42 y 1050 px; 
+    altos entre 39 y 768 px).
+  * Requisito técnico: Cualquier descriptor debe devolver un vector 1D de 
+    longitud fija independiente de la resolución original.
+
+2. ARQUITECTURA DEL PIPELINE Y PROTOCOLO DE EVALUACIÓN
+--------------------------------------------------------------------------------
+- Preprocesado base (redimensionar / preprocesar):
+  * Estandarización a tamaño fijo (128x128 px).
+  * Selección adaptativa de interpolación: cv2.INTER_AREA al reducir tamaño 
+    (evita aliasing) y cv2.INTER_LINEAR al ampliar.
+- Extracción eficiente (extraer_todas):
+  * Cálculo de matrices de características X y guardado en disco (.npy en caché) 
+    para acelerar las iteraciones experimentales.
+- Validación experimental (evaluar):
+  * Validación cruzada estratificada de 5 particiones (StratifiedKFold, 
+    n_splits=5, shuffle=True, random_state=0) sobre train.
+  * Normalización de características (StandardScaler) ajustada estrictamente 
+    dentro de cada partición de entrenamiento (evita fuga de datos hacia validación).
+  * Clasificador fijo: SVC(kernel="rbf", C=1, gamma="scale") para comparar 
+    descriptores en igualdad de condiciones.
+
+3. DESARROLLO DE DESCRIPTORES DE COLOR (PARTE 1)
+--------------------------------------------------------------------------------
+3.1. Histograma de color global (descriptor_color)
+- Diseño: Cálculo independiente del histograma para los 3 canales BGR con 
+  bins=8 intervalos por canal, concatenados en un único vector 1D.
+- Normalización: División por la suma total de píxeles (normalización L1) para 
+  trabajar con proporciones relativas y lograr invarianza al tamaño de la imagen.
+- Dimensionalidad resultante: 3 canales x 8 bins = 24 características (float32).
+- Limitación detectada: Pierde por completo la distribución espacial (no distingue 
+  si un color pertenece al fondo o al animal).
+
+3.2. Histograma de color por regiones (descriptor_color_regiones)
+- Diseño: División de la imagen redimensionada en una rejilla espacial de n x n 
+  bloques (n=2 -> 4 cuadrantes) mediante np.array_split, calculando el histograma 
+  normalizado en cada bloque y concatenando los resultados.
+- Dimensionalidad resultante: 4 bloques x 24 = 96 características.
+- Resultado de validación (5-fold CV): ~0.8050 ± 0.0812 de acierto medio.
+
+4. CONCLUSIONES DE LOS EXPERIMENTOS (PARTE 1)
+--------------------------------------------------------------------------------
+- Efecto de la redimensión:
+  * Apenas altera el histograma global gracias a la normalización por área 
+    (las proporciones de color se conservan). Su utilidad principal es reducir el 
+    tiempo de cómputo y permitir divisiones exactas en rejillas espaciales.
+- Influencia del número de bins:
+  * Pocos bins (2-4): Subajuste; agrupan tonos distintos y pierden poder 
+    discriminativo.
+  * Bins intermedios (8-32): Compromiso óptimo entre detalle cromático y 
+    capacidad de generalización.
+  * Muchos bins (128-256): Sobreajuste (overfitting) y alta sensibilidad al ruido 
+    o cambios leves de luz.
+- Aporte de la división en regiones:
+  * Mejora sustancialmente la precisión respecto al histograma global al 
+    incorporar estructura espacial (posición relativa del sujeto y el fondo).
+- Impacto de la ecualización y espacios de color:
+  * Ecualizar directamente canales BGR/RGB empeora el rendimiento al distorsionar 
+    los colores reales y amplificar el ruido de fondo.
+  * El uso de espacios perceptuales (HSV/Lab) o ecualizar únicamente el canal de 
+    luminosidad (V/L) mejora la robustez frente a variaciones de iluminación sin 
+    alterar el tono real del pelaje.
+
+================================================================================
+5. [PENDIENTE - PARTE 2: TEXTURA (LBP), COMBINACIÓN Y ANÁLISIS DE ERRORES]
+================================================================================
+- 5.1. Descriptor de textura LBP básico (hipótesis, implementación y resultado)
+- 5.2. Refinamiento de LBP (uniforme, radio/vecinos, división por regiones)
+- 5.3. Fusión de descriptores (Color + Textura) y validación
+- 5.4. Análisis de errores: ¿Qué imágenes fallan con todos los descriptores y 
+       qué tienen en común?
+- 5.5. Evaluación final sobre el conjunto de test
+===============================================================================
